@@ -34,6 +34,9 @@ body{background:var(--stage);font-family:"Zen Maru Gothic","Hiragino Maru Gothic
 #empty{position:absolute;left:50%;top:40%;transform:translate(-50%,-50%);width:min(78vw,320px);text-align:center;font-size:15px;line-height:1.8}
 #empty button{margin-top:14px}
 #shadow{position:absolute;left:0;top:0;border-radius:50%;background:radial-gradient(closest-side,rgba(40,28,20,.32),rgba(40,28,20,0));pointer-events:none;will-change:transform}
+#fx{position:absolute;inset:0;pointer-events:none}
+#fx canvas{position:absolute;left:0;top:0}
+#fx .flyer{will-change:transform;filter:drop-shadow(0 4px 6px rgba(0,0,0,.28))}
 #chara{position:absolute;left:0;top:0;transform-origin:50% 100%;will-change:transform;-webkit-user-drag:none;cursor:pointer}
 
 #gear{position:fixed;right:calc(16px + env(safe-area-inset-right,0px));bottom:calc(18px + env(safe-area-inset-bottom,0px));width:44px;height:44px;border-radius:50%;border:none;background:var(--sheet);color:var(--ink);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);display:grid;place-items:center;transition:opacity .6s;z-index:5}
@@ -79,6 +82,7 @@ input[type=file]{display:none}
 <body>
 <div id="stage">
   <div id="empty">ホーム画面のスクリーンショットを選ぶと、<br>その上でうさぎが動きます。<br><button class="btn" id="emptyPick">スクリーンショットを選ぶ</button></div>
+  <div id="fx"></div>
   <div id="shadow"></div>
   <img id="chara" alt="キャラクター" draggable="false">
 </div>
@@ -153,6 +157,7 @@ const COLS=4,ROWS=6;
 const G={ax:.155,ay:.115,bx:.845,by:.705,dockY:.915,size:.155};
 let OCC=new Array(COLS*ROWS+COLS).fill(false);
 let hasBg=false,bgImg=null;
+const KICKED=new Map(); // 蹴られて元の場所にいないアイコン
 
 function readFile(f){return new Promise(r=>{const fr=new FileReader();fr.onload=()=>r(fr.result);fr.readAsDataURL(f)})}
 function loadImg(src){return new Promise((r,j)=>{const i=new Image();i.onload=()=>r(i);i.onerror=j;i.src=src})}
@@ -205,10 +210,23 @@ function cellRects(){
   }
   return list;
 }
-function icons(){return hasBg?cellRects().filter(r=>OCC[r.i]):[]}
+function icons(){return hasBg?cellRects().filter(r=>OCC[r.i]&&!KICKED.has(r.i)):[]}
 function updateIconInfo(){
   const n=OCC.filter(Boolean).length;
   $('iconInfo').textContent=hasBg?`アイコン ${n} 個を認識中`:'スクリーンショットを選ぶと合わせられます';
+}
+
+/* 背景を画面と同じ大きさで描いたキャンバス（切り抜き・穴埋め用） */
+let screenCv=null,screenKey='';
+function screenCanvas(){
+  if(!bgImg)return null;
+  const W=innerWidth,H=innerHeight,dpr=Math.min(3,devicePixelRatio||1),key=W+'x'+H+'@'+dpr+bgImg.src.length;
+  if(screenCv&&screenKey===key)return screenCv;
+  const sc=Math.max(W/bgImg.width,H/bgImg.height),ox=(W-bgImg.width*sc)/2,oy=(H-bgImg.height*sc)/2;
+  const cv=document.createElement('canvas');cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr);
+  const g=cv.getContext('2d',{willReadFrequently:true});g.setTransform(dpr,0,0,dpr,0,0);
+  g.drawImage(bgImg,ox,oy,bgImg.width*sc,bgImg.height*sc);
+  cv.dpr=dpr;screenCv=cv;screenKey=key;return cv;
 }
 
 /* 自動判定：枠の中と、すき間（壁紙）の色を比べる */
@@ -263,7 +281,7 @@ $('detect').onclick=()=>{detectIcons();renderCalib();saveGeo()};
 $('flipBar').onclick=()=>{const b=$('calibBar');b.classList.toggle('top');$('flipBar').textContent=b.classList.contains('top')?'案内を下へ':'案内を上へ'};
 function openCalib(){
   if(!hasBg){$('status').textContent='';sheet.classList.add('open');return}
-  sheet.classList.remove('open');$('iconSize').value=(G.size*100).toFixed(1);
+  clearKicks();sheet.classList.remove('open');$('iconSize').value=(G.size*100).toFixed(1);
   calib.classList.add('on');gear.style.display='none';S.paused=true;chara.style.visibility=shadow.style.visibility='hidden';renderCalib();
 }
 function closeCalib(){
@@ -275,6 +293,7 @@ function saveGeo(){DB.set('geo',{...G});DB.set('occ',OCC.slice())}
 
 /* ---------- 表示 ---------- */
 async function setBg(src){
+  clearKicks();screenCv=null;
   stage.style.backgroundImage=src?`url("${src}")`:'';
   $('bgThumb').style.backgroundImage=src?`url("${src}")`:'';
   $('empty').style.display=src?'none':'block';
@@ -322,14 +341,15 @@ function rescue(){
 }
 
 /* 寄りかかる場所を探す */
-function leanSpot(){
+function leanSpot(kind='lean'){
   const list=icons();if(!list.length)return null;
+  const gap=kind==='kick'?.95:.86;
   const b=bounds(),relaxed={...b,minX:-S.w*.25,maxX:innerWidth-S.w*.75},good=[],ok=[];
   for(const R of list)for(const side of ['L','R']){
-    const x=side==='L'?R.x-S.w*.86:R.x+R.s-S.w*.14;
+    const x=side==='L'?R.x-S.w*gap:R.x+R.s-S.w*(1-gap);
     const y=R.y+R.s-S.h+Math.min(6,R.s*.06);
     if(!inBounds(x,y,relaxed))continue;
-    const spot={x,y,icon:R,side};
+    const spot={x,y,icon:R,side,kind};
     (feetFree(x,y,R)?good:ok).push(spot);
   }
   const pool=good.length?good:ok;
@@ -341,9 +361,9 @@ const rnd=(a,b)=>a+Math.random()*(b-a);
 const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
 function startIdle(){S.mode='idle';S.t=0;S.dur=rnd(1.2,3.5);S.goal=null;S.lookFlip=Math.random()<.35?rnd(.4,S.dur-.2):-1}
 function startWalk(){S.goal={kind:'walk',...freeSpot()};S.hops=0;S.hesitated=false;nextHop()}
-function startLeanTrip(){
-  const sp=leanSpot();if(!sp){startWalk();return}
-  S.goal={kind:'lean',...sp};S.hops=0;S.hesitated=false;nextHop();
+function startLeanTrip(kind='lean'){
+  const sp=leanSpot(kind);if(!sp){startWalk();return}
+  S.goal={...sp};S.hops=0;S.hesitated=false;nextHop();
 }
 function nextHop(){
   const g=S.goal;if(!g){startIdle();return}
@@ -352,8 +372,8 @@ function nextHop(){
   const stepLen=S.w*rnd(.32,.45);
   if(dist<4){arrive();return}
   /* 最後のひと跳び：寄りかかり先には障害物を無視して着地 */
-  if(dist<=stepLen*1.15&&(g.kind==='lean'||feetFree(g.x,g.y))){hopTo(g.x,g.y,true,false);return}
-  if(g.kind==='lean'&&dist<=S.h*1.6){hopTo(g.x,g.y,true,true);return}
+  if(dist<=stepLen*1.15&&(g.kind!=='walk'||feetFree(g.x,g.y))){hopTo(g.x,g.y,true,false);return}
+  if(g.kind!=='walk'&&dist<=S.h*1.6){hopTo(g.x,g.y,true,true);return}
   const base=Math.atan2(dy,dx),step=Math.min(dist,stepLen),b=bounds();
   const tryHop=(off,len,leap)=>{
     const a=base+off*Math.PI/180,nx=S.x+Math.cos(a)*len,ny=S.y+Math.sin(a)*len;
@@ -381,12 +401,104 @@ function hopTo(x,y,final,leap){
 }
 function arrive(){
   const g=S.goal;
+  if(g&&g.kind==='kick'){
+    if(KICKED.has(g.icon.i)||!OCC[g.icon.i]){startIdle();return}
+    S.x=g.x;S.y=g.y;S.mode='kick';S.t=0;S.kicked=false;
+    S.dir=g.side==='L'?-1:1;S.leanDir=g.side==='L'?1:-1;S.kickIcon=g.icon;
+    return;
+  }
   if(g&&g.kind==='lean'){
     S.x=g.x;S.y=g.y;S.mode='lean';S.t=0;S.dur=rnd(3,6.5);
     S.dir=g.side==='L'?-1:1; // 背中をアイコンに向ける（元画像は左向き）
     S.leanDir=g.side==='L'?1:-1;S.leanIcon=g.icon;
   }else startIdle();
 }
+/* ---------- 蹴られたアイコン ---------- */
+const fx=document.getElementById('fx');
+function makeCanvas(R,pad){
+  const dpr=Math.min(3,devicePixelRatio||1),size=R.s+pad*2,c=document.createElement('canvas');
+  c.width=Math.round(size*dpr);c.height=Math.round(size*dpr);c.style.width=c.style.height=size+'px';
+  return {c,g:c.getContext('2d'),dpr,size};
+}
+function rr(g,x,y,w,h,r){g.beginPath();g.moveTo(x+r,y);g.arcTo(x+w,y,x+w,y+h,r);g.arcTo(x+w,y+h,x,y+h,r);g.arcTo(x,y+h,x,y,r);g.arcTo(x,y,x+w,y,r);g.closePath()}
+/* アイコン部分を切り抜く */
+function iconSprite(R){
+  const src=screenCanvas(),pad=1,{c,g,dpr,size}=makeCanvas(R,pad),sd=src.dpr;
+  g.scale(dpr,dpr);rr(g,pad,pad,R.s,R.s,R.s*.225);g.clip();
+  g.drawImage(src,(R.x-pad)*sd,(R.y-pad)*sd,size*sd,size*sd,0,0,size,size);
+  c.className='flyer';return c;
+}
+/* 抜けた跡を左右の壁紙の色でなめらかに埋める */
+function holePatch(R){
+  const src=screenCanvas(),sg=src.getContext('2d',{willReadFrequently:true}),sd=src.dpr,pad=3;
+  const {c,g,dpr,size}=makeCanvas(R,pad),W=c.width,H=c.height;
+  const lx=Math.max(0,Math.round((R.x-pad-2)*sd)),rx=Math.min(src.width-1,Math.round((R.x+R.s+pad+2)*sd));
+  const y0=Math.round((R.y-pad)*sd),hh=Math.round(size*sd);
+  const L=sg.getImageData(lx,y0,1,hh).data,Rt=sg.getImageData(rx,y0,1,hh).data;
+  const T=sg.getImageData(Math.round((R.x-pad)*sd),Math.max(0,y0-2),Math.round(size*sd),1).data;
+  const B=sg.getImageData(Math.round((R.x-pad)*sd),Math.min(src.height-1,y0+hh+1),Math.round(size*sd),1).data;
+  const out=g.createImageData(W,H),o=out.data,sw=Math.round(size*sd);
+  for(let y=0;y<H;y++){const sy=Math.min(hh-1,Math.floor(y/H*hh)),v=y/(H-1);
+    for(let x=0;x<W;x++){const sx=Math.min(sw-1,Math.floor(x/W*sw)),u=x/(W-1),i=(y*W+x)*4;
+      for(let ch=0;ch<3;ch++){
+        const h=L[sy*4+ch]*(1-u)+Rt[sy*4+ch]*u, vv=T[sx*4+ch]*(1-v)+B[sx*4+ch]*v;
+        o[i+ch]=(h+vv)/2}
+      o[i+3]=255}}
+  g.putImageData(out,0,0);
+  const m=makeCanvas(R,pad);m.g.filter='blur(1.5px)';m.g.drawImage(c,0,0);
+  return m.c;
+}
+function kickIcon(R,dirX){
+  if(!screenCanvas()||KICKED.has(R.i))return;
+  const patch=holePatch(R),pad=3;
+  patch.style.transform=`translate(${R.x-pad}px,${R.y-pad}px)`;
+  const el=iconSprite(R);
+  fx.appendChild(patch);fx.appendChild(el);
+  const big=Math.random()<.18;
+  const f={R,el,patch,x:R.x-1,y:R.y-1,rot:0,
+    vx:dirX*(big?rnd(700,950):rnd(240,380)),vy:big?rnd(-900,-700):rnd(-520,-380),
+    vr:dirX*(big?rnd(700,1000):rnd(260,520)),state:big?'out':'fly',t:0,floor:R.y-1};
+  KICKED.set(R.i,f);
+}
+function updateFlyers(dt){
+  const W=innerWidth,H=innerHeight;
+  for(const [i,f] of KICKED){
+    f.t+=dt;const s=f.R.s;
+    if(f.state==='fly'||f.state==='drop'){
+      f.vy+=1500*dt;f.x+=f.vx*dt;f.y+=f.vy*dt;f.rot+=f.vr*dt;
+      if(f.x<0){f.x=0;f.vx=-f.vx*.5;f.vr*=-.6}
+      if(f.x>W-s){f.x=W-s;f.vx=-f.vx*.5;f.vr*=-.6}
+      if(f.y>f.floor&&f.vy>0){
+        f.y=f.floor;f.vy=-f.vy*.38;f.vx*=.55;f.vr*=.45;
+        if(Math.abs(f.vy)<90){f.vy=0;
+          if(f.state==='drop'){f.state='settle';f.t=0;f.from={x:f.x,y:f.y,rot:f.rot}}
+          else{f.state='rest';f.t=0;f.wait=rnd(2.5,4.5);
+            const q=Math.round(f.rot/90)*90;f.restRot=Math.abs(f.rot-q)<35?q+rnd(-8,8):f.rot}}
+      }
+    }else if(f.state==='out'){
+      f.vy+=500*dt;f.x+=f.vx*dt;f.y+=f.vy*dt;f.rot+=f.vr*dt;
+      if(f.x<-s*2||f.x>W+s*2||f.y<-s*2||f.y>H+s){f.state='away';f.t=0;f.wait=rnd(2.4,3.2);f.el.style.visibility='hidden'}
+    }else if(f.state==='away'){
+      if(f.t>f.wait){ // 空から落ちて戻ってくる
+        f.state='drop';f.t=0;f.x=f.R.x-1;f.y=-s-30;f.vx=0;f.vy=0;f.vr=rnd(-180,180);f.el.style.visibility=''}
+    }else if(f.state==='rest'){
+      f.rot+=(f.restRot-f.rot)*Math.min(1,dt*8);
+      if(f.t>f.wait){f.state='return';f.t=0;f.from={x:f.x,y:f.y,rot:f.rot}}
+    }else if(f.state==='return'||f.state==='settle'){
+      /* ぴょこぴょこ跳ねて元の場所へ戻る */
+      const D=f.state==='return'?Math.max(.6,Math.hypot(f.from.x-f.R.x,f.from.y-f.R.y)/260):.35;
+      const k=Math.min(1,f.t/D),e=k<.5?2*k*k:1-Math.pow(-2*k+2,2)/2;
+      const hops=f.state==='return'?Math.max(1,Math.round(D/.3)):1;
+      const tr=Math.round(f.from.rot/360)*360;
+      f.x=f.from.x+(f.R.x-1-f.from.x)*e;f.y=f.from.y+(f.R.y-1-f.from.y)*e-Math.abs(Math.sin(k*Math.PI*hops))*s*.25;
+      f.rot=f.from.rot+(tr-f.from.rot)*e;
+      if(k>=1){f.el.remove();f.patch.remove();KICKED.delete(i);continue}
+    }
+    f.el.style.transform=`translate(${f.x}px,${f.y}px) rotate(${f.rot}deg)`;
+  }
+}
+function clearKicks(){for(const [,f] of KICKED){f.el.remove();f.patch.remove()}KICKED.clear()}
+
 let last=performance.now();
 function frame(now){
   const dt=Math.min(.05,(now-last)/1000);last=now;
@@ -397,7 +509,8 @@ function frame(now){
   if(S.mode==='idle'){
     const br=Math.sin(S.t*2.4)*.018;sx=1-br*.5;sy=1+br;
     if(S.lookFlip>0&&S.t>S.lookFlip){S.dir*=-1;S.lookFlip=-1}
-    if(S.t>S.dur){if(S.afterLean){S.afterLean=false;startWalk()}else (icons().length&&Math.random()<.4)?startLeanTrip():startWalk()}
+    if(S.t>S.dur){if(S.afterLean){S.afterLean=false;startWalk()}else{const r=Math.random(),n=icons().length;
+      if(n&&r<.25)startLeanTrip('lean');else if(n&&r<.5)startLeanTrip('kick');else startWalk()}}
   }else if(S.mode==='hesitate'){
     const q=Math.sin(Math.PI*Math.min(1,S.t/S.dur));sx=1+.05*q;sy=1-.06*q;
     if(S.t>S.dur){const p=S.pending;hopTo(p.x,p.y,false,p.leap)}
@@ -420,18 +533,31 @@ function frame(now){
     targetTilt=S.leanDir*9*Math.min(inK,outK);
     const br=Math.sin(S.t*1.6)*.022;sx=1-br*.5;sy=1+br;
     if(S.t>S.dur){S.mode='idle';S.t=0;S.dur=.3;S.lookFlip=-1;S.afterLean=true}
+  }else if(S.mode==='kick'){
+    /* うさぎらしく後ろ足で蹴る：かがむ → 後ろへキック → 振り返る */
+    const t=S.t,L=S.leanDir;let push=0;
+    if(t<.25){}
+    else if(t<.62){const k=(t-.25)/.37;sy=1-.1*k;sx=1+.06*k;targetTilt=-L*6*k}
+    else if(t<.78){const k=(t-.62)/.16;sy=.9+.16*k;sx=1.06;targetTilt=-L*16;push=S.w*.07*k;
+      if(!S.kicked){S.kicked=true;kickIcon(S.kickIcon,L)}}
+    else if(t<1.4){const k=(t-.78)/.62;sy=1.06-.06*k;targetTilt=-L*16*(1-k);push=S.w*.07*(1-k)}
+    else if(t<1.45){S.dir*=-1;S.t=1.45} // 振り返って見る
+    else if(t>2.6){S.mode='idle';S.t=0;S.dur=.2;S.afterLean=true}
+    S.pushX=L*push;
   }else if(S.mode==='jump'){
     const k=Math.min(1,S.t/S.dur);lift=Math.sin(Math.PI*k)*S.h*.45;sy=1.06;sx=.95;
     if(k>=1){S.mode='land';S.t=0;S.dur=.18;S.finalHop=false}
   }
-  S.tilt+=(targetTilt-S.tilt)*Math.min(1,dt*10);
-  chara.style.transform=`translate(${S.x}px,${S.y-lift}px) rotate(${S.tilt}deg) scale(${sx*-S.dir},${sy})`;
+  if(S.mode!=='kick')S.pushX=0;
+  S.tilt+=(targetTilt-S.tilt)*Math.min(1,dt*(S.mode==='kick'?22:10));
+  updateFlyers(dt);
+  chara.style.transform=`translate(${S.x+(S.pushX||0)}px,${S.y-lift}px) rotate(${S.tilt}deg) scale(${sx*-S.dir},${sy})`;
   const sh=1-lift/(S.h*.6);
   shadow.style.transform=`translate(${S.x+S.w*.1}px,${S.y+S.h-S.w*.09}px) scale(${Math.max(.45,sh)})`;
   shadow.style.opacity=Math.max(.35,sh);
 }
 chara.addEventListener('pointerdown',e=>{e.stopPropagation();
-  if(S.mode==='lean'){S.mode='idle';S.t=0;S.dur=.1;S.afterLean=true}
+  if(S.mode==='lean'||S.mode==='kick'){S.mode='idle';S.t=0;S.dur=.1;S.afterLean=true}
   if(S.mode!=='jump'){S.mode='jump';S.t=0;S.dur=.55;S.goal=null}});
 
 /* ---------- 設定UI ---------- */
@@ -453,7 +579,7 @@ $('fileCh').onchange=async e=>{
 $('resetCh').onclick=async()=>{await setChar(DEFAULT_CHAR);DB.del('char');rescue();$('status').textContent='うさぎに戻しました。'};
 $('size').oninput=e=>{S.sizePct=+e.target.value;layout();DB.set('size',S.sizePct)};
 $('size').onchange=()=>rescue();
-addEventListener('resize',()=>{layout();if(calib.classList.contains('on'))renderCalib()});
+addEventListener('resize',()=>{clearKicks();layout();if(calib.classList.contains('on'))renderCalib()});
 
 /* ---------- 起動 ---------- */
 (async()=>{
