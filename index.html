@@ -36,6 +36,21 @@ body{background:var(--stage);font-family:"Zen Maru Gothic","Hiragino Maru Gothic
 #shadow{position:absolute;left:0;top:0;border-radius:50%;background:radial-gradient(closest-side,rgba(40,28,20,.32),rgba(40,28,20,0));pointer-events:none;will-change:transform}
 #fx{position:absolute;inset:0;pointer-events:none}
 #fx canvas{position:absolute;left:0;top:0}
+#fx .pop{position:absolute;left:0;top:0;font-weight:700;pointer-events:none;will-change:transform,opacity;text-shadow:0 1px 3px rgba(0,0,0,.25)}
+#fx .heart{color:#F08FA0;font-size:22px;animation:heart 1.3s ease-out forwards}
+#fx .zzz{color:#fff;font-size:20px;font-family:"Zen Maru Gothic",system-ui,sans-serif;animation:zzz 2.6s ease-out forwards}
+#fx .bang{color:#fff;font-size:30px;font-family:"Zen Maru Gothic",system-ui,sans-serif;animation:bang .9s ease-out forwards}
+@keyframes heart{0%{opacity:0;transform:translate(var(--x),var(--y)) scale(.4)}15%{opacity:1;transform:translate(var(--x),calc(var(--y) - 8px)) scale(1.1)}100%{opacity:0;transform:translate(calc(var(--x) + var(--dx)),calc(var(--y) - 70px)) scale(.9)}}
+@keyframes zzz{0%{opacity:0;transform:translate(var(--x),var(--y)) scale(.6)}20%{opacity:.95}100%{opacity:0;transform:translate(calc(var(--x) + var(--dx)),calc(var(--y) - 60px)) scale(1.25)}}
+@keyframes bang{0%{opacity:0;transform:translate(var(--x),var(--y)) scale(.3)}25%{opacity:1;transform:translate(var(--x),calc(var(--y) - 10px)) scale(1.25)}70%{opacity:1;transform:translate(var(--x),calc(var(--y) - 12px)) scale(1)}100%{opacity:0;transform:translate(var(--x),calc(var(--y) - 16px)) scale(1)}}
+#night{position:absolute;inset:0;background:radial-gradient(ellipse at 50% 40%,rgba(14,18,44,.28),rgba(6,8,24,.5));opacity:0;transition:opacity 3s ease;pointer-events:none}
+#night.on{opacity:1}
+#gear.sleep{opacity:0;pointer-events:none}
+.seg{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.seg button{font:inherit;font-size:13px;font-weight:700;border:none;border-radius:999px;padding:7px 13px;background:transparent;color:var(--ink);box-shadow:inset 0 0 0 1.5px var(--line)}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--sheet);box-shadow:none}
+.seg button:focus-visible{outline:3px solid var(--ear);outline-offset:2px}
+.hint{font-size:12px;color:var(--ink-soft);margin-top:6px;line-height:1.5}
 #fx .flyer{will-change:transform;filter:drop-shadow(0 4px 6px rgba(0,0,0,.28))}
 #chara{position:absolute;left:0;top:0;transform-origin:50% 100%;will-change:transform;-webkit-user-drag:none;cursor:pointer}
 
@@ -82,6 +97,7 @@ input[type=file]{display:none}
 <body>
 <div id="stage">
   <div id="empty">ホーム画面のスクリーンショットを選ぶと、<br>その上でうさぎが動きます。<br><button class="btn" id="emptyPick">スクリーンショットを選ぶ</button></div>
+  <div id="night"></div>
   <div id="fx"></div>
   <div id="shadow"></div>
   <img id="chara" alt="キャラクター" draggable="false">
@@ -130,6 +146,25 @@ input[type=file]{display:none}
     <div class="txt"><b>大きさ</b></div>
     <input type="range" id="size" min="10" max="40" step="1" value="15" aria-label="キャラクターの大きさ">
   </div>
+  <div class="row" style="display:block">
+    <div class="txt"><b>キックの頻度</b></div>
+    <div class="seg" id="segKick" role="group" aria-label="キックの頻度">
+      <button data-v="6">よく蹴る</button><button data-v="10">ふつう</button><button data-v="20">たまに</button><button data-v="0">蹴らない</button>
+    </div>
+  </div>
+  <div class="row" style="display:block">
+    <div class="txt"><b>眠るまでの時間</b><span>画面に触らないでいると、あくびをして眠ります。タップで起きます</span></div>
+    <div class="seg" id="segSleep" role="group" aria-label="眠るまでの時間">
+      <button data-v="30">30秒</button><button data-v="60">1分</button><button data-v="180">3分</button><button data-v="0">眠らない</button>
+    </div>
+  </div>
+  <div class="row" style="display:block">
+    <label class="check" style="margin-top:0"><input type="checkbox" id="keepOn"><b style="font-size:15px">画面をつけたままにする</b></label>
+    <div class="hint" id="keepHint">このアプリを開いている間だけ、自動ロックで画面が消えないようにします</div>
+  </div>
+  <div class="row" style="display:block">
+    <div class="txt"><b>さわり方</b><span>タップでジャンプ／なでると喜ぶ／長押しでつまんで運べる</span></div>
+  </div>
   <div class="row"><button class="btn" id="close" style="width:100%">閉じる</button></div>
 </div>
 <input type="file" id="fileBg" accept="image/*">
@@ -149,7 +184,7 @@ const DB={db:null,
 };
 
 /* ---------- 状態 ---------- */
-const S={x:0,y:0,dir:1,w:100,h:100,sizePct:15,mode:'idle',t:0,dur:2,
+const S={lastTouch:0,lift:0,vl:0,hvx:0,x:0,y:0,dir:1,w:100,h:100,sizePct:15,mode:'idle',t:0,dur:2,
   hopFrom:null,hopTo:null,target:null,ratio:1.53,tilt:0,goal:null,hops:0,paused:false};
 
 /* アイコン配置：画面に対する割合で保持（4列×6行＋ドック4つ） */
@@ -157,7 +192,9 @@ const COLS=4,ROWS=6;
 const G={ax:.155,ay:.115,bx:.845,by:.705,dockY:.915,size:.155};
 let OCC=new Array(COLS*ROWS+COLS).fill(false);
 let hasBg=false,bgImg=null;
-const KICK={next:0,recent:[]}; // 次に蹴りに行く時刻と、最近蹴ったアイコン
+const KICK={next:0,recent:[]};
+const CFG={kickEvery:10,sleepAfter:60,keepOn:false};
+function scheduleKick(max){const I=CFG.kickEvery;if(!I){KICK.next=Infinity;return}let d=Math.max(2,(I-3.5)*rnd(.8,1.2));if(max)d=Math.min(d,max);KICK.next=nowS()+d} // 次に蹴りに行く時刻と、最近蹴ったアイコン
 const nowS=()=>performance.now()/1000;
 const KICKED=new Map(); // 蹴られて元の場所にいないアイコン
 
@@ -284,11 +321,11 @@ $('flipBar').onclick=()=>{const b=$('calibBar');b.classList.toggle('top');$('fli
 function openCalib(){
   if(!hasBg){$('status').textContent='';sheet.classList.add('open');return}
   clearKicks();sheet.classList.remove('open');$('iconSize').value=(G.size*100).toFixed(1);
-  calib.classList.add('on');gear.style.display='none';S.paused=true;chara.style.visibility=shadow.style.visibility='hidden';renderCalib();
+  calib.classList.add('on');gear.style.display='none';S.paused=true;$('night').classList.remove('on');gear.classList.remove('sleep');if(S.mode==='sleep'||S.mode==='yawn')S.mode='idle';chara.style.visibility=shadow.style.visibility='hidden';renderCalib();
 }
 function closeCalib(){
   calib.classList.remove('on');gear.style.display='';S.paused=false;chara.style.visibility=shadow.style.visibility='';
-  saveGeo();rescue();KICK.next=nowS()+rnd(3,5);startIdle();wake();
+  saveGeo();rescue();scheduleKick(5);startIdle();wake();
 }
 $('openCalib').onclick=openCalib;$('calibDone').onclick=closeCalib;
 function saveGeo(){DB.set('geo',{...G});DB.set('occ',OCC.slice())}
@@ -473,7 +510,7 @@ function kickIcon(R,dirX){
     vr:dirX*(big?rnd(700,1000):rnd(260,520)),state:big?'out':'fly',t:0,floor:R.y-1};
   KICKED.set(R.i,f);
   KICK.recent.push(R.i);if(KICK.recent.length>6)KICK.recent.shift();
-  KICK.next=nowS()+rnd(5.5,7.5);
+  scheduleKick();
 }
 function updateFlyers(dt){
   const W=innerWidth,H=innerHeight;
@@ -520,8 +557,34 @@ function frame(now){
   requestAnimationFrame(frame);
   if(S.paused)return;
   S.t+=dt;
-  let lift=0,sx=1,sy=1,targetTilt=0;
-  if(S.mode==='idle'){
+  let lift=0,sx=1,sy=1,targetTilt=0,abs=false;
+  /* 放置されたら眠くなる */
+  if(CFG.sleepAfter&&(S.mode==='idle'||S.mode==='lean')&&nowS()-S.lastTouch>CFG.sleepAfter){
+    S.mode='yawn';S.t=0;S.goal=null;$('night').classList.add('on');gear.classList.add('sleep');
+  }
+  if(S.mode==='yawn'){
+    /* ぐーっと伸びてから、丸くなる */
+    const t=S.t;
+    if(t<.9){const k=Math.sin(Math.PI*t/.9);sy=1+.1*k;sx=1-.05*k;targetTilt=S.dir*-4*k}
+    else{const k=Math.min(1,(t-.9)/.8);sy=1-.1*k;sx=1+.06*k}
+    if(t>1.7){S.mode='sleep';S.t=0;S.nextZ=.6}
+  }else if(S.mode==='sleep'){
+    const br=Math.sin(S.t*1.8);sy=.9+.018*br;sx=1.06-.01*br;targetTilt=-S.dir*4;
+    if(S.t>S.nextZ){S.nextZ=S.t+rnd(1.1,1.6);
+      const z=['z','Z','z'][Math.floor(Math.random()*3)];
+      pop('zzz',z,S.x+S.w*(S.dir<0?.72:.18),S.y+S.h*.08,S.dir<0?rnd(8,22):-rnd(8,22))}
+  }else if(S.mode==='pet'){
+    /* なでられてうっとり */
+    const k=Math.sin(S.t*7);sy=.95+.02*k;sx=1.04;targetTilt=k*4;
+    if(nowS()-S.petAt>.6){S.mode='idle';S.t=0;S.dur=rnd(.6,1.2);S.lookFlip=-1}
+  }else if(S.mode==='held'){
+    /* つままれてぶらーん */
+    abs=true;sy=1.08;sx=.94;targetTilt=clamp(-S.hvx*.02,-24,24)+Math.sin(S.t*5)*3;
+    S.hvx*=.85;
+  }else if(S.mode==='drop'){
+    S.vl-=2600*dt;S.lift+=S.vl*dt;lift=Math.max(0,S.lift);sy=1.06;sx=.95;
+    if(S.lift<=0){S.mode='land';S.t=0;S.dur=.2;S.finalHop=false;S.afterDrop=true}
+  }else if(S.mode==='idle'){
     const br=Math.sin(S.t*2.4)*.018;sx=1-br*.5;sy=1+br;
     if(S.lookFlip>0&&S.t>S.lookFlip){S.dir*=-1;S.lookFlip=-1}
     if(S.t>S.dur){if(S.afterLean){S.afterLean=false;(icons().length&&nowS()>=KICK.next)?startLeanTrip('kick'):startWalk()}else{const r=Math.random(),n=icons().length;
@@ -540,7 +603,8 @@ function frame(now){
   }else if(S.mode==='land'){
     const k=Math.min(1,S.t/S.dur);const q=Math.sin(Math.PI*k);sx=1+.09*q;sy=1-.09*q;
     if(k>=1){
-      if(S.finalHop){S.finalHop=false;arrive()}
+      if(S.afterDrop){S.afterDrop=false;startIdle();S.lookFlip=.5}
+      else if(S.finalHop){S.finalHop=false;arrive()}
       else if(S.goal&&S.goal.kind==='walk'&&icons().length&&nowS()>=KICK.next)startLeanTrip('kick');
       else if(S.goal&&S.goal.kind==='walk'&&Math.random()<.1)startIdle();
       else nextHop();
@@ -567,23 +631,111 @@ function frame(now){
     if(k>=1){S.mode='land';S.t=0;S.dur=.18;S.finalHop=false}
   }
   if(S.mode!=='kick')S.pushX=0;
-  S.tilt+=(targetTilt-S.tilt)*Math.min(1,dt*(S.mode==='kick'?22:10));
+  if(S.mode!=='held'&&S.mode!=='drop')S.lift=0;
+  S.tilt+=(targetTilt-S.tilt)*Math.min(1,dt*(S.mode==='kick'?22:S.mode==='held'?14:10));
   updateFlyers(dt);
+  if(S.mode==='held')lift=S.h*.35;
   chara.style.transform=`translate(${S.x+(S.pushX||0)}px,${S.y-lift}px) rotate(${S.tilt}deg) scale(${sx*-S.dir},${sy})`;
   const sh=1-lift/(S.h*.6);
   shadow.style.transform=`translate(${S.x+S.w*.1}px,${S.y+S.h-S.w*.09}px) scale(${Math.max(.45,sh)})`;
   shadow.style.opacity=Math.max(.35,sh);
 }
-chara.addEventListener('pointerdown',e=>{e.stopPropagation();
-  if(S.mode==='lean'||S.mode==='kick'){S.mode='idle';S.t=0;S.dur=.1;S.afterLean=true}
-  if(S.mode!=='jump'){S.mode='jump';S.t=0;S.dur=.55;S.goal=null}});
+/* ---------- ふきだし（ハート・Zzz・！） ---------- */
+function pop(cls,txt,x,y,dx=0){
+  const el=document.createElement('span');el.className='pop '+cls;el.textContent=txt;
+  el.style.setProperty('--x',x+'px');el.style.setProperty('--y',y+'px');el.style.setProperty('--dx',dx+'px');
+  el.addEventListener('animationend',()=>el.remove());fx.appendChild(el);
+}
+function wakeUp(){
+  if(S.mode!=='sleep'&&S.mode!=='yawn')return false;
+  $('night').classList.remove('on');gear.classList.remove('sleep');
+  pop('bang','！',S.x+S.w*.42,S.y-S.h*.05);
+  S.mode='jump';S.t=0;S.dur=.55;S.goal=null;S.dir*=-1;
+  scheduleKick(4);return true;
+}
+
+/* ---------- さわる：タップ／なでる／長押しでつまむ ---------- */
+const P={id:null};
+function interrupt(){if(S.mode==='lean'||S.mode==='kick'||S.mode==='hop'||S.mode==='hesitate'||S.mode==='land'){S.goal=null;S.finalHop=false}}
+chara.addEventListener('pointerdown',e=>{
+  e.stopPropagation();e.preventDefault();S.lastTouch=nowS();wake(true);
+  if(wakeUp())return;
+  if(P.id!==null)return;
+  chara.setPointerCapture(e.pointerId);
+  Object.assign(P,{id:e.pointerId,x0:e.clientX,y0:e.clientY,lx:e.clientX,ly:e.clientY,t0:nowS(),kind:null,dist:0});
+  P.timer=setTimeout(()=>{if(P.kind===null&&P.id!==null)startHold(P.lx,P.ly)},380);
+});
+chara.addEventListener('pointermove',e=>{
+  if(e.pointerId!==P.id)return;
+  const dx=e.clientX-P.lx,dy=e.clientY-P.ly;P.lx=e.clientX;P.ly=e.clientY;S.lastTouch=nowS();
+  if(P.kind==='hold'){
+    S.hvx=S.hvx*.5+dx/Math.max(.016,1/60)*.5;
+    S.x=clamp(e.clientX-S.w/2,-S.w*.3,innerWidth-S.w*.7);S.y=clamp(e.clientY-S.h*.2+S.h*.35,0,innerHeight-S.h*.6);
+    if(Math.abs(dx)>1)S.dir=dx>0?-1:1; // 引っぱられる向きと逆を向く
+    return;
+  }
+  if(P.kind===null&&Math.hypot(e.clientX-P.x0,e.clientY-P.y0)>12){P.kind='pet';clearTimeout(P.timer);interrupt()}
+  if(P.kind==='pet'){
+    P.dist+=Math.hypot(dx,dy);
+    if(S.mode!=='pet'){S.mode='pet';S.t=0}
+    S.petAt=nowS();
+    if(P.dist>45){P.dist=0;pop('heart','♥',S.x+S.w*rnd(.2,.65),S.y+S.h*rnd(.05,.3),rnd(-24,24))}
+  }
+});
+function endPointer(e){
+  if(e.pointerId!==P.id)return;
+  clearTimeout(P.timer);
+  if(P.kind==='hold')dropChara();
+  else if(P.kind===null&&nowS()-P.t0<.38){
+    interrupt();
+    if(S.mode!=='jump'){S.mode='jump';S.t=0;S.dur=.55;S.goal=null}
+  }
+  P.id=null;P.kind=null;
+}
+chara.addEventListener('pointerup',endPointer);chara.addEventListener('pointercancel',endPointer);
+function startHold(x,y){
+  P.kind='hold';interrupt();S.mode='held';S.t=0;S.hvx=0;
+  S.x=clamp(x-S.w/2,-S.w*.3,innerWidth-S.w*.7);S.y=clamp(y-S.h*.2+S.h*.35,0,innerHeight-S.h*.6);
+  if(navigator.vibrate)try{navigator.vibrate(10)}catch(e){}
+}
+function dropChara(){
+  /* 離した場所の少し下に落ちる。アイコンの上なら近くの空いた場所へ */
+  const b=bounds(),vy=S.y-S.h*.35;
+  const gy=clamp(vy+S.h*.3,b.minY,b.maxY);
+  S.x=clamp(S.x,b.minX,b.maxX);S.y=gy;rescue();
+  S.lift=Math.max(S.h*.15,S.y-vy);S.vl=0;S.mode='drop';S.t=0;
+}
 
 /* ---------- 設定UI ---------- */
 let dimTimer;
-function wake(){gear.classList.remove('dim');clearTimeout(dimTimer);dimTimer=setTimeout(()=>gear.classList.add('dim'),3000)}
-stage.addEventListener('pointerdown',wake);
+function wake(fromChara){S.lastTouch=nowS();if(!fromChara)wakeUp();applyWake();if(gear.classList.contains('sleep'))return;gear.classList.remove('dim');clearTimeout(dimTimer);dimTimer=setTimeout(()=>gear.classList.add('dim'),3000)}
+stage.addEventListener('pointerdown',()=>wake());
 gear.onclick=()=>{sheet.classList.add('open');wake()};
+sheet.addEventListener('pointerdown',()=>{S.lastTouch=nowS()});
 $('close').onclick=()=>{sheet.classList.remove('open');wake()};
+
+/* 頻度・眠るまでの時間・画面スリープ */
+function bindSeg(id,key,after){
+  const box=$(id),sync=()=>box.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',+b.dataset.v===CFG[key]));
+  box.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;CFG[key]=+b.dataset.v;sync();DB.set('cfg',{...CFG});after&&after()});
+  return sync;
+}
+const syncKick=bindSeg('segKick','kickEvery',()=>scheduleKick(4));
+const syncSleep=bindSeg('segSleep','sleepAfter');
+let lock=null;
+async function applyWake(){
+  try{
+    if(CFG.keepOn&&document.visibilityState==='visible'){
+      if(!lock&&'wakeLock' in navigator){lock=await navigator.wakeLock.request('screen');lock.addEventListener('release',()=>{lock=null})}
+    }else if(lock){await lock.release();lock=null}
+  }catch(e){}
+}
+document.addEventListener('visibilitychange',applyWake);
+$('keepOn').onchange=async e=>{
+  CFG.keepOn=e.target.checked;DB.set('cfg',{...CFG});await applyWake();
+  if(CFG.keepOn&&!('wakeLock' in navigator))$('keepHint').textContent='このiPhoneでは使えないため、設定アプリの「自動ロック」を「なし」にしてください';
+  else $('keepHint').textContent='このアプリを開いている間だけ、自動ロックで画面が消えないようにします';
+};
 $('pickBg').onclick=$('emptyPick').onclick=()=>$('fileBg').click();
 $('pickCh').onclick=()=>$('fileCh').click();
 $('fileBg').onchange=async e=>{const f=e.target.files[0];if(!f)return;const src=await readFile(f);
@@ -602,15 +754,16 @@ addEventListener('resize',()=>{clearKicks();layout();if(calib.classList.contains
 /* ---------- 起動 ---------- */
 (async()=>{
   await DB.open();
-  const [bg,ch,sz,geo,occ]=await Promise.all([DB.get('bg'),DB.get('char'),DB.get('size'),DB.get('geo'),DB.get('occ')]);
+  const [bg,ch,sz,geo,occ,cfg]=await Promise.all([DB.get('bg'),DB.get('char'),DB.get('size'),DB.get('geo'),DB.get('occ'),DB.get('cfg')]);
   if(sz){S.sizePct=sz;$('size').value=sz}
+  if(cfg)Object.assign(CFG,cfg);syncKick();syncSleep();$('keepOn').checked=CFG.keepOn;S.lastTouch=nowS();
   if(geo)Object.assign(G,geo);
   await setBg(bg||null);
   if(occ&&occ.length===OCC.length)OCC=occ;else if(bg)detectIcons();
   updateIconInfo();
   await setChar(ch||DEFAULT_CHAR);
   const b=bounds();S.x=(b.minX+b.maxX)/2;S.y=b.maxY*.8;rescue();
-  KICK.next=nowS()+rnd(4,6);
+  scheduleKick(6);
   startIdle();wake();requestAnimationFrame(frame);
 })();
 </script>
